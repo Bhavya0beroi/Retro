@@ -15,7 +15,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS pods (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
-                live_upload_id INTEGER DEFAULT NULL 
+                live_upload_id INTEGER DEFAULT NULL
             )
         ''')
         c.execute('''
@@ -78,7 +78,7 @@ def generate_ai_summary(upload_id):
         )
     if comments_df.empty:
         return "No comments available to generate a summary."
-    
+
     summary = "Key takeaways from comments:\n"
     unique_comments = comments_df['content'].unique()
     for comment in unique_comments:
@@ -103,7 +103,7 @@ if 'page' not in st.session_state:
 def page_login():
     st.title("Join Your Pod Channel")
     st.write("This is the starting point. Select your pod and enter your name to begin.")
-    
+
     pods = get_pods()
     pod_names = [""] + pods['name'].tolist() if not pods.empty else [""]
     selected_pod_name = st.selectbox("Select your Pod Name", pod_names)
@@ -134,7 +134,6 @@ def page_login():
 
 # == Page 2: User Upload & Interaction ==
 def page_user_upload_interaction():
-    # Defensive check for session state
     if 'selected_pod_name' not in st.session_state:
         st.error("Session expired. Please log out and log back in.")
         return
@@ -171,9 +170,9 @@ def page_user_upload_interaction():
                 with st.expander("View AI Summary & All Feedback"):
                     st.write("**AI-Generated Summary**")
                     st.code(generate_ai_summary(upload['id']), language='text')
-                
+
                 cols = st.columns(2)
-                with cols[0]: 
+                with cols[0]:
                     st.write("**React**")
                     reaction_emojis = ["👍", "💡", "🔥", "🤔"]
                     r_cols = st.columns(4)
@@ -196,14 +195,13 @@ def page_user_upload_interaction():
 # == Page 3: Host Review & Voting ==
 def page_host_review():
     st.title("Host Review Session")
-    
-    # SOLUTION: This is the definitive guard clause to prevent the error.
+
     if 'selected_pod_id' not in st.session_state or st.session_state.selected_pod_id is None:
         st.error("Could not identify the pod. Please log out and select your pod again.")
         return
-        
+
     pod_id = st.session_state.selected_pod_id
-    
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (int(pod_id),))
@@ -221,7 +219,7 @@ def page_host_review():
         st.success("🟢 A retro session is LIVE! Join in and give your feedback.")
         st.header(f"Presenting: {live_upload_data['file_name']} by {live_upload_data['user_name']}")
         display_uploaded_content(live_upload_data)
-        
+
         st.subheader("Live Interaction")
         cols = st.columns(2)
         with cols[0]:
@@ -258,7 +256,7 @@ def page_host_review():
 
         upload_options = uploads.set_index('id')['file_name'].to_dict()
         selected_upload_id = st.selectbox("Select an Upload to Present", options=list(upload_options.keys()), format_func=lambda x: upload_options[x])
-        
+
         if st.button("🚀 Go Live with this Upload"):
             with get_db_connection() as conn:
                 conn.execute("UPDATE pods SET live_upload_id = ? WHERE id = ?", (selected_upload_id, pod_id))
@@ -266,17 +264,16 @@ def page_host_review():
 
 # == Page 4: Retro Summary ==
 def page_retro_summary():
-    # Defensive check for session state
     if 'selected_pod_name' not in st.session_state:
         st.error("Session expired. Please log out and log back in.")
         return
 
     st.title("Retro Summary Library")
     st.write(f"Review past retro sessions and learnings for {st.session_state.selected_pod_name}.")
-    
+
     with get_db_connection() as conn:
         uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(st.session_state.selected_pod_id,))
-    
+
     if uploads.empty:
         st.info("No uploads found for this pod, so no summaries are available.")
     else:
@@ -286,7 +283,7 @@ def page_retro_summary():
                 st.caption(f"Presented by: {upload['user_name']} on {upload['timestamp']}")
                 st.write("**AI-Generated Key Takeaways:**")
                 st.code(generate_ai_summary(upload['id']), language='text')
-                
+
                 with get_db_connection() as conn:
                      votes = pd.read_sql_query("SELECT content FROM interactions WHERE upload_id = ? AND interaction_type='vote'", conn, params=(upload['id'],))['content'].value_counts()
                 st.write("**Final Vote:**")
@@ -297,12 +294,10 @@ def page_retro_summary():
 
 # --- Main App Router ---
 if 'logged_in' in st.session_state and st.session_state.logged_in:
-    # --- Sidebar for logged-in users ---
     st.sidebar.title("Zero1 Retro Studio")
-    # Defensive check for session state
     if 'user_name' in st.session_state and 'selected_pod_name' in st.session_state:
         st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{st.session_state.selected_pod_name}**")
-    
+
     st.sidebar.header("Navigation")
     if st.sidebar.button("Current Pod Channel"):
         st.session_state.page = 'user_upload_interaction'
