@@ -2,8 +2,6 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-import io
-from PIL import Image
 
 # --- 1. App Configuration ---
 st.set_page_config(layout="wide", page_title="Zero1 Retro Studio")
@@ -13,7 +11,6 @@ def init_db():
     """Initializes the SQLite database and creates tables if they don't exist."""
     with sqlite3.connect('retro_studio.db') as conn:
         c = conn.cursor()
-        # Pods Table - Added live_upload_id to track the live session
         c.execute('''
             CREATE TABLE IF NOT EXISTS pods (
                 id INTEGER PRIMARY KEY,
@@ -21,7 +18,6 @@ def init_db():
                 live_upload_id INTEGER DEFAULT NULL 
             )
         ''')
-        # Uploads Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS uploads (
                 id INTEGER PRIMARY KEY,
@@ -34,7 +30,6 @@ def init_db():
                 FOREIGN KEY (pod_id) REFERENCES pods(id)
             )
         ''')
-        # Interactions Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS interactions (
                 id INTEGER PRIMARY KEY,
@@ -91,25 +86,16 @@ def generate_ai_summary(upload_id):
     return summary
 
 def display_uploaded_content(upload_data):
-    """
-    Reusable function to display uploaded content.
-    Plays videos directly or provides a download for other file types.
-    """
+    """Reusable function to display uploaded content."""
     if upload_data['upload_type'] == 'Video':
         st.video(upload_data['file_data'])
     else:
         st.info(f"Content placeholder for {upload_data['upload_type']}: {upload_data['file_name']}.")
         st.download_button(f"Download {upload_data['file_name']}", upload_data['file_data'], upload_data['file_name'])
 
-# --- 4. State Management ---
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
+# --- 4. State Management Initialization ---
 if 'page' not in st.session_state:
     st.session_state.page = 'login'
-if 'selected_pod_id' not in st.session_state:
-    st.session_state.selected_pod_id = None
-if 'user_name' not in st.session_state:
-    st.session_state.user_name = ''
 
 # --- 5. UI Rendering ---
 
@@ -125,12 +111,15 @@ def page_login():
 
     if st.button("Login to Channel"):
         if selected_pod_name and user_name_input:
-            selected_pod_id = pods[pods['name'] == selected_pod_name]['id'].iloc[0]
-            st.session_state.logged_in = True
-            st.session_state.user_name = user_name_input
-            st.session_state.selected_pod_id = selected_pod_id
-            st.session_state.page = 'user_upload_interaction'
-            st.rerun()
+            selected_pod = pods[pods['name'] == selected_pod_name]
+            if not selected_pod.empty:
+                # SOLUTION: Store all necessary info in session state at login
+                st.session_state.logged_in = True
+                st.session_state.user_name = user_name_input
+                st.session_state.selected_pod_id = int(selected_pod.iloc[0]['id'])
+                st.session_state.selected_pod_name = selected_pod.iloc[0]['name']
+                st.session_state.page = 'user_upload_interaction'
+                st.rerun()
         else:
             st.error("Please select a pod and enter your name.")
 
@@ -146,15 +135,7 @@ def page_login():
 
 # == Page 2: User Upload & Interaction ==
 def page_user_upload_interaction():
-    pod_id = st.session_state.selected_pod_id
-    with get_db_connection() as conn:
-        pod_df = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,))
-        if pod_df.empty:
-            st.error("Selected pod not found. Please log out and try again.")
-            return
-        pod_name = pod_df.iloc[0]['name']
-    
-    st.title(f"Pod Channel: {pod_name}")
+    st.title(f"Pod Channel: {st.session_state.selected_pod_name}")
     st.write("Upload your work, view submissions from your team, and provide feedback asynchronously.")
 
     with st.expander("⬆️ Upload Your Work"):
@@ -167,13 +148,13 @@ def page_user_upload_interaction():
                 with get_db_connection() as conn:
                     conn.execute(
                         "INSERT INTO uploads (pod_id, user_name, upload_type, file_data, file_name, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-                        (pod_id, st.session_state.user_name, upload_type, file_data, uploaded_file.name, timestamp)
+                        (st.session_state.selected_pod_id, st.session_state.user_name, upload_type, file_data, uploaded_file.name, timestamp)
                     )
                 st.success("File uploaded successfully!")
 
     st.header("Pod Feed")
     with get_db_connection() as conn:
-        uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ? ORDER BY timestamp DESC", conn, params=(pod_id,))
+        uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ? ORDER BY timestamp DESC", conn, params=(st.session_state.selected_pod_id,))
 
     if uploads.empty:
         st.info("No uploads in this pod yet. Be the first!")
@@ -182,9 +163,7 @@ def page_user_upload_interaction():
             with st.container(border=True):
                 st.subheader(f"{upload['file_name']} by {upload['user_name']}")
                 st.caption(f"Type: {upload['upload_type']} | Uploaded: {upload['timestamp']}")
-                
                 display_uploaded_content(upload)
-                
                 with st.expander("View AI Summary & All Feedback"):
                     st.write("**AI-Generated Summary**")
                     st.code(generate_ai_summary(upload['id']), language='text')
@@ -217,14 +196,9 @@ def page_host_review():
     
     with get_db_connection() as conn:
         live_upload_id_df = pd.read_sql_query("SELECT live_upload_id FROM pods WHERE id = ?", conn, params=(pod_id,))
-        if live_upload_id_df.empty:
-            st.error("Selected pod not found. Please log out and try again.")
-            return
         live_upload_id = live_upload_id_df.iloc[0]['live_upload_id']
 
     if live_upload_id:
-        # --- ATTENDEE VIEW ---
-        st.success("🟢 A retro session is LIVE! Join in and give your feedback.")
         with get_db_connection() as conn:
             live_upload_data_df = pd.read_sql_query("SELECT * FROM uploads WHERE id = ?", conn, params=(int(live_upload_id),))
             if live_upload_data_df.empty:
@@ -232,10 +206,10 @@ def page_host_review():
                 return
             live_upload_data = live_upload_data_df.iloc[0]
 
+        st.success("🟢 A retro session is LIVE! Join in and give your feedback.")
         st.header(f"Presenting: {live_upload_data['file_name']} by {live_upload_data['user_name']}")
         display_uploaded_content(live_upload_data)
         
-        # --- ENHANCEMENT: Added interaction elements for all members ---
         st.subheader("Live Interaction")
         cols = st.columns(2)
         with cols[0]:
@@ -245,7 +219,6 @@ def page_host_review():
             for i, emoji in enumerate(reaction_emojis):
                 if r_cols[i].button(emoji, key=f"live_react_{emoji}_{live_upload_data['id']}"):
                     add_interaction(live_upload_data['id'], st.session_state.user_name, 'reaction', emoji)
-        
         with cols[1]:
             st.write("**Comment**")
             with st.form(f"live_comment_form_{live_upload_data['id']}", clear_on_submit=True):
@@ -260,14 +233,9 @@ def page_host_review():
             votes = interactions[interactions['interaction_type'] == 'vote']['content'].value_counts()
             reactions = interactions[interactions['interaction_type'] == 'reaction']['content'].value_counts()
             v_col, r_col = st.columns(2)
-            with v_col:
-                st.write("**Voting Results**")
-                st.bar_chart(votes)
-            with r_col:
-                st.write("**Reaction Summary**")
-                st.bar_chart(reactions)
+            with v_col: st.write("**Voting Results**"); st.bar_chart(votes)
+            with r_col: st.write("**Reaction Summary**"); st.bar_chart(reactions)
     else:
-        # --- HOST VIEW (when no session is live) ---
         st.write("As the host, select an upload to present to the team.")
         with get_db_connection() as conn:
             uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(pod_id,))
@@ -287,18 +255,11 @@ def page_host_review():
 # == Page 4: Retro Summary ==
 def page_retro_summary():
     st.title("Retro Summary Library")
-    st.write("Review past retro sessions and learnings for your pod.")
+    st.write(f"Review past retro sessions and learnings for {st.session_state.selected_pod_name}.")
     
-    pod_id = st.session_state.selected_pod_id
     with get_db_connection() as conn:
-        pod_df = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,))
-        if pod_df.empty:
-            st.error("Selected pod not found. Please log out and try again.")
-            return
-        pod_name = pod_df.iloc[0]['name']
-        uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(pod_id,))
+        uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(st.session_state.selected_pod_id,))
     
-    st.header(f"Summaries for {pod_name}")
     if uploads.empty:
         st.info("No uploads found for this pod, so no summaries are available.")
     else:
@@ -317,46 +278,42 @@ def page_retro_summary():
                 else:
                     st.write("No votes were recorded.")
 
-
 # --- Main App Router ---
-if not st.session_state.logged_in:
-    page_login()
-else:
+# SOLUTION: This router is now much cleaner and more reliable.
+if 'logged_in' in st.session_state and st.session_state.logged_in:
     # --- Sidebar for logged-in users ---
     st.sidebar.title("Zero1 Retro Studio")
-    with get_db_connection() as conn:
-        pod_df = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(st.session_state.selected_pod_id,))
-        if not pod_df.empty:
-            pod_name = pod_df.iloc[0]['name']
-            st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{pod_name}**")
-        else:
-            st.sidebar.error("Pod not found. Please log out.")
+    st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{st.session_state.selected_pod_name}**")
     
     st.sidebar.header("Navigation")
     if st.sidebar.button("Current Pod Channel"):
         st.session_state.page = 'user_upload_interaction'
-        st.rerun()
     if st.sidebar.button("Host/Live Review Session"):
         st.session_state.page = 'host_review'
-        st.rerun()
     if st.sidebar.button("Retro Summary Library"):
         st.session_state.page = 'retro_summary'
-        st.rerun()
     if st.sidebar.button("Logout"):
-        if st.session_state.selected_pod_id:
+        pod_id = st.session_state.get('selected_pod_id')
+        if pod_id:
             with get_db_connection() as conn:
-                conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (st.session_state.selected_pod_id,))
-        for key in st.session_state.keys():
+                conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (pod_id,))
+        # Clear all session data on logout
+        for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
     # --- Page routing for logged-in users ---
-    if st.session_state.page == 'user_upload_interaction':
+    page_to_show = st.session_state.get('page', 'user_upload_interaction')
+    if page_to_show == 'user_upload_interaction':
         page_user_upload_interaction()
-    elif st.session_state.page == 'host_review':
+    elif page_to_show == 'host_review':
         page_host_review()
-    elif st.session_state.page == 'retro_summary':
+    elif page_to_show == 'retro_summary':
         page_retro_summary()
-    else:
-        # Default to login page if something goes wrong
-        page_login()
+    else: # Fallback to the main pod page
+        page_user_upload_interaction()
+
+else:
+    # If not logged in, always show the login page.
+    page_login()
+
