@@ -6,20 +6,16 @@ import io
 from PIL import Image
 
 # --- 1. App Configuration ---
-# Set the layout to wide mode for better use of screen space and a title for the browser tab.
 st.set_page_config(layout="wide", page_title="Zero1 Retro Studio")
 
 # --- 2. Database Initialization ---
 def init_db():
     """
-    Initializes the SQLite database.
-    This function connects to a local DB file and creates the necessary tables 
-    if they don't already exist. This ensures data persistence across app sessions.
+    Initializes the SQLite database. This function connects to a local DB file 
+    and creates the necessary tables if they don't already exist.
     """
     with sqlite3.connect('retro_studio.db') as conn:
         c = conn.cursor()
-        
-        # Pods Table: Stores team channels.
         c.execute('''
             CREATE TABLE IF NOT EXISTS pods (
                 id INTEGER PRIMARY KEY,
@@ -27,28 +23,24 @@ def init_db():
                 description TEXT
             )
         ''')
-        
-        # Uploads Table: Stores user-submitted content like videos or PPTs.
         c.execute('''
             CREATE TABLE IF NOT EXISTS uploads (
                 id INTEGER PRIMARY KEY,
                 pod_id INTEGER,
                 user_name TEXT,
-                upload_type TEXT, -- e.g., 'Video', 'PPT', 'Recording'
+                upload_type TEXT,
                 file_data BLOB,
                 file_name TEXT,
                 timestamp TEXT,
                 FOREIGN KEY (pod_id) REFERENCES pods(id)
             )
         ''')
-        
-        # Interactions Table: Logs every user action (reactions, comments, votes).
         c.execute('''
             CREATE TABLE IF NOT EXISTS interactions (
                 id INTEGER PRIMARY KEY,
                 upload_id INTEGER,
                 user_name TEXT,
-                interaction_type TEXT, -- 'reaction', 'comment', 'vote'
+                interaction_type TEXT,
                 content TEXT,
                 timestamp TEXT,
                 FOREIGN KEY (upload_id) REFERENCES uploads(id)
@@ -56,7 +48,6 @@ def init_db():
         ''')
         conn.commit()
 
-# Run the database setup function once when the app starts.
 init_db()
 
 # --- 3. Helper Functions ---
@@ -72,7 +63,7 @@ def get_pods():
 def add_interaction(upload_id, user_name, interaction_type, content):
     """Adds a new interaction (comment, vote, reaction) to the database."""
     if not user_name:
-        st.warning("Please enter your name in the sidebar to interact.")
+        st.warning("User not identified. Please log in again.")
         return
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     with get_db_connection() as conn:
@@ -86,11 +77,7 @@ def add_interaction(upload_id, user_name, interaction_type, content):
 
 
 def generate_ai_summary(upload_id):
-    """
-    Placeholder for AI summary functionality.
-    It fetches all comments for a given upload and formats them into a simple summary.
-    In a real-world scenario, this would be replaced with an API call to a language model.
-    """
+    """Placeholder for AI summary. Generates a summary from comments."""
     with get_db_connection() as conn:
         comments_df = pd.read_sql_query(
             f"SELECT content FROM interactions WHERE upload_id = {upload_id} AND interaction_type = 'comment'", conn
@@ -105,9 +92,11 @@ def generate_ai_summary(upload_id):
     return summary
 
 # --- 4. State Management ---
-# Using Streamlit's session_state to maintain state across user interactions.
+# Added 'logged_in' to control access to the main app.
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
 if 'page' not in st.session_state:
-    st.session_state.page = 'pod_selection'
+    st.session_state.page = 'login'
 if 'selected_pod_id' not in st.session_state:
     st.session_state.selected_pod_id = None
 if 'user_name' not in st.session_state:
@@ -115,47 +104,41 @@ if 'user_name' not in st.session_state:
 
 # --- 5. UI Rendering ---
 
-# Sidebar for global navigation and user identification.
-st.sidebar.title("Zero1 Retro Studio")
-st.session_state.user_name = st.sidebar.text_input("Enter Your Name", st.session_state.user_name, help="Your name is used for uploads and comments.")
-
-# Dynamic navigation buttons appear based on the user's current page.
-if st.session_state.page != 'pod_selection':
-    if st.sidebar.button("⬅️ Back to Pod Selection"):
-        st.session_state.page = 'pod_selection'
-        st.session_state.selected_pod_id = None
-        st.rerun()
-
-st.sidebar.header("Navigation")
-if st.sidebar.button("Host Review Session"):
-    st.session_state.page = 'host_review'
-    st.rerun()
-if st.sidebar.button("Retro Summary Library"):
-    st.session_state.page = 'retro_summary'
-    st.rerun()
-
-# == Page 1: Pod Selection ==
-def page_pod_selection():
-    st.title("Select Your Pod Channel")
-    st.write("This is the starting point. Choose your team's channel to begin.")
-
+# == Page 1: Login Page ==
+def page_login():
+    st.title("Join Your Pod Channel")
+    st.write("This is the starting point. Select your pod and enter your name to begin.")
+    
     pods = get_pods()
     if pods.empty:
-        st.info("No pods found. Create the first one below!")
-        with st.form("create_pod"):
-            pod_name = st.text_input("Create a New Pod Name")
-            if st.form_submit_button("Create Pod"):
-                with get_db_connection() as conn:
-                    conn.execute("INSERT INTO pods (name) VALUES (?)", (pod_name,))
-                st.rerun()
+        st.info("No pods exist yet. Create the first one below.")
     else:
-        # Create a responsive grid layout for the pod buttons.
-        cols = st.columns(4)
-        for i, pod in pods.iterrows():
-            with cols[i % 4]:
-                if st.button(pod['name'], key=pod['id'], use_container_width=True, help=f"Enter the {pod['name']} channel"):
-                    st.session_state.selected_pod_id = pod['id']
-                    st.session_state.page = 'user_upload_interaction'
+        pod_names = [""] + pods['name'].tolist()
+        selected_pod_name = st.selectbox("Select your Pod Name", pod_names)
+        
+        user_name_input = st.text_input("Enter your Name")
+
+        if st.button("Login to Channel"):
+            if selected_pod_name and user_name_input:
+                selected_pod_id = pods[pods['name'] == selected_pod_name]['id'].iloc[0]
+                
+                # Set session state upon successful login
+                st.session_state.logged_in = True
+                st.session_state.user_name = user_name_input
+                st.session_state.selected_pod_id = selected_pod_id
+                st.session_state.page = 'user_upload_interaction' # Go directly to the pod channel
+                st.rerun()
+            else:
+                st.error("Please select a pod and enter your name.")
+
+    with st.expander("Or, Create a New Pod"):
+        with st.form("create_pod", clear_on_submit=True):
+            new_pod_name = st.text_input("New Pod Name")
+            if st.form_submit_button("Create Pod"):
+                if new_pod_name:
+                    with get_db_connection() as conn:
+                        conn.execute("INSERT INTO pods (name) VALUES (?)", (new_pod_name,))
+                    st.success(f"Pod '{new_pod_name}' created successfully! You can now select it from the list.")
                     st.rerun()
 
 # == Page 2: User Upload & Interaction ==
@@ -174,17 +157,14 @@ def page_user_upload_interaction():
             
             submitted = st.form_submit_button("Upload")
             if submitted and uploaded_file is not None:
-                if not st.session_state.user_name:
-                    st.warning("Please enter your name in the sidebar to upload.")
-                else:
-                    file_data = uploaded_file.getvalue()
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    with get_db_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO uploads (pod_id, user_name, upload_type, file_data, file_name, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-                            (pod_id, st.session_state.user_name, upload_type, file_data, uploaded_file.name, timestamp)
-                        )
-                    st.success("File uploaded successfully!")
+                file_data = uploaded_file.getvalue()
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "INSERT INTO uploads (pod_id, user_name, upload_type, file_data, file_name, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                        (pod_id, st.session_state.user_name, upload_type, file_data, uploaded_file.name, timestamp)
+                    )
+                st.success("File uploaded successfully!")
 
     st.header("Pod Feed")
     with get_db_connection() as conn:
@@ -198,11 +178,10 @@ def page_user_upload_interaction():
                 st.subheader(f"{upload['file_name']} by {upload['user_name']}")
                 st.caption(f"Type: {upload['upload_type']} | Uploaded: {upload['timestamp']}")
                 
-                # --- MODIFIED SECTION: Display video or placeholder ---
                 if upload['upload_type'] == 'Video':
                     st.video(upload['file_data'])
                 else:
-                    st.info(f"Content placeholder for {upload['upload_type']}: {upload['file_name']}. Download button below.")
+                    st.info(f"Content placeholder for {upload['upload_type']}: {upload['file_name']}.")
                     st.download_button(f"Download {upload['file_name']}", upload['file_data'], upload['file_name'])
                 
                 with st.expander("View AI Summary & All Feedback"):
@@ -241,108 +220,115 @@ def page_user_upload_interaction():
 # == Page 3: Host Review & Voting ==
 def page_host_review():
     st.title("Host Review Session")
-    st.write("As the host, select a Pod to review its uploads with the team in real-time.")
+    st.write("As the host, select an upload to review with the team in real-time.")
+    
+    pod_id = st.session_state.selected_pod_id
+    with get_db_connection() as conn:
+        uploads = pd.read_sql_query(f"SELECT * FROM uploads WHERE pod_id = {pod_id} ORDER BY timestamp", conn)
 
-    pods = get_pods()
-    if pods.empty:
-        st.warning("No pods exist. Please create one from the Pod Selection page.")
-        return
+    if uploads.empty:
+        st.warning(f"No uploads found for this pod.")
+    else:
+        upload_titles = uploads['file_name'].tolist()
+        selected_upload_title = st.selectbox("Select an Upload to Present", upload_titles)
         
-    pod_options = pods['name'].tolist()
-    selected_pod_name = st.selectbox("Select a Pod to Review", pod_options)
-
-    if selected_pod_name:
-        pod_id = pods[pods['name'] == selected_pod_name]['id'].iloc[0]
-        with get_db_connection() as conn:
-            uploads = pd.read_sql_query(f"SELECT * FROM uploads WHERE pod_id = {pod_id} ORDER BY timestamp", conn)
-
-        if uploads.empty:
-            st.warning(f"No uploads found for the {selected_pod_name} pod.")
+        upload = uploads[uploads['file_name'] == selected_upload_title].iloc[0]
+        
+        st.header(f"Presenting: {upload['file_name']} by {upload['user_name']}")
+        
+        if upload['upload_type'] == 'Video':
+            st.video(upload['file_data'])
         else:
-            upload_titles = uploads['file_name'].tolist()
-            selected_upload_title = st.selectbox("Select an Upload to Present", upload_titles)
-            
-            upload = uploads[uploads['file_name'] == selected_upload_title].iloc[0]
-            
-            st.header(f"Presenting: {upload['file_name']} by {upload['user_name']}")
-            
-            # --- MODIFIED SECTION: Display video or placeholder ---
-            if upload['upload_type'] == 'Video':
-                st.video(upload['file_data'])
-            else:
-                st.info(f"Host presents content for {upload['upload_type']}: {upload['file_name']}. Feedback appears below.")
+            st.info(f"Host presents content for {upload['upload_type']}: {upload['file_name']}. Feedback appears below.")
 
-            st.subheader("Live Feedback Dashboard")
-            with get_db_connection() as conn:
-                interactions = pd.read_sql_query(f"SELECT * FROM interactions WHERE upload_id = {upload['id']}", conn)
+        st.subheader("Live Feedback Dashboard")
+        with get_db_connection() as conn:
+            interactions = pd.read_sql_query(f"SELECT * FROM interactions WHERE upload_id = {upload['id']}", conn)
 
-            if interactions.empty:
-                st.info("No feedback yet. Team members can add feedback from the Pod Channel page.")
-            else:
-                votes = interactions[interactions['interaction_type'] == 'vote']['content'].value_counts()
-                reactions = interactions[interactions['interaction_type'] == 'reaction']['content'].value_counts()
-                
-                v_col, r_col = st.columns(2)
-                with v_col:
-                    st.write("**Voting Results**")
-                    st.bar_chart(votes)
-                with r_col:
-                    st.write("**Reaction Summary**")
-                    st.bar_chart(reactions)
-                
-                st.write("**Comments Log**")
-                comments = interactions[interactions['interaction_type'] == 'comment'][['user_name', 'content', 'timestamp']]
-                st.dataframe(comments, use_container_width=True)
+        if interactions.empty:
+            st.info("No feedback yet.")
+        else:
+            votes = interactions[interactions['interaction_type'] == 'vote']['content'].value_counts()
+            reactions = interactions[interactions['interaction_type'] == 'reaction']['content'].value_counts()
+            
+            v_col, r_col = st.columns(2)
+            with v_col:
+                st.write("**Voting Results**")
+                st.bar_chart(votes)
+            with r_col:
+                st.write("**Reaction Summary**")
+                st.bar_chart(reactions)
+            
+            st.write("**Comments Log**")
+            comments = interactions[interactions['interaction_type'] == 'comment'][['user_name', 'content', 'timestamp']]
+            st.dataframe(comments, use_container_width=True)
 
 # == Page 4: Retro Summary ==
 def page_retro_summary():
     st.title("Retro Summary Library")
-    st.write("Review past retro sessions and learnings for each pod.")
+    st.write("Review past retro sessions and learnings for your pod.")
     
-    pods = get_pods()
-    if pods.empty:
-        st.warning("No pods exist. Please create one from the Pod Selection page.")
-        return
+    pod_id = st.session_state.selected_pod_id
+    with get_db_connection() as conn:
+        pod_name = pd.read_sql_query(f"SELECT name FROM pods WHERE id = {pod_id}", conn).iloc[0]['name']
+    st.header(f"Summaries for {pod_name}")
 
-    pod_options = pods['name'].tolist()
-    selected_pod_name = st.selectbox("Select a Pod to View Summaries", pod_options)
+    with get_db_connection() as conn:
+        uploads = pd.read_sql_query(f"SELECT * FROM uploads WHERE pod_id = {pod_id}", conn)
+    
+    if uploads.empty:
+        st.info("No uploads found for this pod, so no summaries are available.")
+    else:
+        for _, upload in uploads.iterrows():
+            with st.container(border=True):
+                st.subheader(f"Summary for '{upload['file_name']}'")
+                st.caption(f"Presented by: {upload['user_name']} on {upload['timestamp']}")
+                
+                st.write("**AI-Generated Key Takeaways:**")
+                st.code(generate_ai_summary(upload['id']), language='text')
+                
+                with get_db_connection() as conn:
+                     votes = pd.read_sql_query(f"SELECT content FROM interactions WHERE upload_id={upload['id']} AND interaction_type='vote'", conn)['content'].value_counts()
+                st.write("**Final Vote:**")
+                if not votes.empty:
+                    st.bar_chart(votes)
+                else:
+                    st.write("No votes were recorded.")
 
-    if selected_pod_name:
-        pod_id = pods[pods['name'] == selected_pod_name]['id'].iloc[0]
-        st.header(f"Summaries for {selected_pod_name}")
 
-        with get_db_connection() as conn:
-            uploads = pd.read_sql_query(f"SELECT * FROM uploads WHERE pod_id = {pod_id}", conn)
-        
-        if uploads.empty:
-            st.info("No uploads found for this pod, so no summaries are available.")
-        else:
-            for _, upload in uploads.iterrows():
-                with st.container(border=True):
-                    st.subheader(f"Summary for '{upload['file_name']}'")
-                    st.caption(f"Presented by: {upload['user_name']} on {upload['timestamp']}")
-                    
-                    st.write("**AI-Generated Key Takeaways:**")
-                    st.code(generate_ai_summary(upload['id']), language='text')
-                    
-                    with get_db_connection() as conn:
-                         votes = pd.read_sql_query(f"SELECT content FROM interactions WHERE upload_id={upload['id']} AND interaction_type='vote'", conn)['content'].value_counts()
-                    st.write("**Final Vote:**")
-                    if not votes.empty:
-                        st.bar_chart(votes)
-                    else:
-                        st.write("No votes were recorded.")
-
-# --- 6. Main App Router ---
-# This block checks the session state and calls the appropriate function to render the page.
-if st.session_state.page == 'pod_selection':
-    page_pod_selection()
-elif st.session_state.page == 'user_upload_interaction':
-    page_user_upload_interaction()
-elif st.session_state.page == 'host_review':
-    page_host_review()
-elif st.session_state.page == 'retro_summary':
-    page_retro_summary()
+# --- Main App Router ---
+# This block checks if the user is logged in and routes them to the correct page.
+if not st.session_state.logged_in:
+    page_login()
 else:
-    # Default to the pod selection page if the state is invalid.
-    page_pod_selection()
+    # --- Sidebar for logged-in users ---
+    st.sidebar.title("Zero1 Retro Studio")
+    with get_db_connection() as conn:
+        pod_name = pd.read_sql_query(f"SELECT name FROM pods WHERE id = {st.session_state.selected_pod_id}", conn).iloc[0]['name']
+    st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{pod_name}**")
+    
+    st.sidebar.header("Navigation")
+    if st.sidebar.button("Current Pod Channel"):
+        st.session_state.page = 'user_upload_interaction'
+        st.rerun()
+    if st.sidebar.button("Host Review Session"):
+        st.session_state.page = 'host_review'
+        st.rerun()
+    if st.sidebar.button("Retro Summary Library"):
+        st.session_state.page = 'retro_summary'
+        st.rerun()
+    if st.sidebar.button("Logout"):
+        # Reset all session state variables on logout
+        for key in st.session_state.keys():
+            del st.session_state[key]
+        st.rerun()
+
+    # --- Page routing for logged-in users ---
+    if st.session_state.page == 'user_upload_interaction':
+        page_user_upload_interaction()
+    elif st.session_state.page == 'host_review':
+        page_host_review()
+    elif st.session_state.page == 'retro_summary':
+        page_retro_summary()
+    else:
+        page_user_upload_interaction() # Default to the main channel page
