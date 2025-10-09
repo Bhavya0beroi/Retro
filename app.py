@@ -148,7 +148,12 @@ def page_login():
 def page_user_upload_interaction():
     pod_id = st.session_state.selected_pod_id
     with get_db_connection() as conn:
-        pod_name = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,)).iloc[0]['name']
+        pod_df = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,))
+        # FIX: Check if pod exists before accessing data
+        if pod_df.empty:
+            st.error("Selected pod not found. Please log out and try again.")
+            return
+        pod_name = pod_df.iloc[0]['name']
     
     st.title(f"Pod Channel: {pod_name}")
     st.write("Upload your work, view submissions from your team, and provide feedback asynchronously.")
@@ -212,23 +217,29 @@ def page_host_review():
     pod_id = st.session_state.selected_pod_id
     
     with get_db_connection() as conn:
-        # CORRECTED QUERY: Using parameters to prevent SQL injection and parsing errors.
         live_upload_id_df = pd.read_sql_query("SELECT live_upload_id FROM pods WHERE id = ?", conn, params=(pod_id,))
+        # FIX: Check if pod exists before accessing data
+        if live_upload_id_df.empty:
+            st.error("Selected pod not found. Please log out and try again.")
+            return
         live_upload_id = live_upload_id_df.iloc[0]['live_upload_id']
 
     if live_upload_id:
         # --- ATTENDEE VIEW ---
         st.success("🟢 A retro session is LIVE! Join in and give your feedback.")
         with get_db_connection() as conn:
-            # CORRECTED QUERY
-            live_upload_data = pd.read_sql_query("SELECT * FROM uploads WHERE id = ?", conn, params=(int(live_upload_id),)).iloc[0]
-        
+            live_upload_data_df = pd.read_sql_query("SELECT * FROM uploads WHERE id = ?", conn, params=(int(live_upload_id),))
+            # FIX: Check if live upload exists before accessing data
+            if live_upload_data_df.empty:
+                st.warning("The live session content is not available. Please wait for the host.")
+                return
+            live_upload_data = live_upload_data_df.iloc[0]
+
         st.header(f"Presenting: {live_upload_data['file_name']} by {live_upload_data['user_name']}")
         display_uploaded_content(live_upload_data)
         
         st.subheader("Live Feedback Dashboard")
         with get_db_connection() as conn:
-            # CORRECTED QUERY
             interactions = pd.read_sql_query("SELECT * FROM interactions WHERE upload_id = ?", conn, params=(int(live_upload_id),))
         if not interactions.empty:
             votes = interactions[interactions['interaction_type'] == 'vote']['content'].value_counts()
@@ -244,7 +255,6 @@ def page_host_review():
         # --- HOST VIEW (when no session is live) ---
         st.write("As the host, select an upload to present to the team.")
         with get_db_connection() as conn:
-            # CORRECTED QUERY
             uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(pod_id,))
 
         if uploads.empty:
@@ -266,7 +276,12 @@ def page_retro_summary():
     
     pod_id = st.session_state.selected_pod_id
     with get_db_connection() as conn:
-        pod_name = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,)).iloc[0]['name']
+        pod_df = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,))
+        # FIX: Check if pod exists before accessing data
+        if pod_df.empty:
+            st.error("Selected pod not found. Please log out and try again.")
+            return
+        pod_name = pod_df.iloc[0]['name']
         uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(pod_id,))
     
     st.header(f"Summaries for {pod_name}")
@@ -296,8 +311,13 @@ else:
     # --- Sidebar for logged-in users ---
     st.sidebar.title("Zero1 Retro Studio")
     with get_db_connection() as conn:
-        pod_name = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(st.session_state.selected_pod_id,)).iloc[0]['name']
-    st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{pod_name}**")
+        # FIX: Added a check here to prevent the main error
+        pod_df = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(st.session_state.selected_pod_id,))
+        if not pod_df.empty:
+            pod_name = pod_df.iloc[0]['name']
+            st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{pod_name}**")
+        else:
+            st.sidebar.error("Pod not found. Please log out.")
     
     st.sidebar.header("Navigation")
     if st.sidebar.button("Current Pod Channel"):
@@ -310,9 +330,9 @@ else:
         st.session_state.page = 'retro_summary'
         st.rerun()
     if st.sidebar.button("Logout"):
-        # Reset pod's live session on logout if user is host
-        with get_db_connection() as conn:
-            conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (st.session_state.selected_pod_id,))
+        if st.session_state.selected_pod_id:
+            with get_db_connection() as conn:
+                conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (st.session_state.selected_pod_id,))
         for key in st.session_state.keys():
             del st.session_state[key]
         st.rerun()
@@ -325,4 +345,6 @@ else:
     elif st.session_state.page == 'retro_summary':
         page_retro_summary()
     else:
-        page_user_upload_interaction()
+        # Default to login page if something goes wrong
+        page_login()
+
