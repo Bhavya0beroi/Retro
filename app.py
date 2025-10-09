@@ -194,8 +194,8 @@ def page_host_review():
     pod_id = st.session_state.selected_pod_id
     
     with get_db_connection() as conn:
-        # FIX: Using a direct cursor execute for reliability
         cursor = conn.cursor()
+        # SOLUTION: The parameter must be passed as a tuple, hence the comma: (pod_id,)
         cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (pod_id,))
         result = cursor.fetchone()
         live_upload_id = result[0] if result else None
@@ -289,10 +289,13 @@ if 'logged_in' in st.session_state and st.session_state.logged_in:
     st.sidebar.header("Navigation")
     if st.sidebar.button("Current Pod Channel"):
         st.session_state.page = 'user_upload_interaction'
+        st.rerun()
     if st.sidebar.button("Host/Live Review Session"):
         st.session_state.page = 'host_review'
+        st.rerun()
     if st.sidebar.button("Retro Summary Library"):
         st.session_state.page = 'retro_summary'
+        st.rerun()
     if st.sidebar.button("Logout"):
         pod_id = st.session_state.get('selected_pod_id')
         if pod_id:
@@ -314,4 +317,3 @@ if 'logged_in' in st.session_state and st.session_state.logged_in:
 
 else:
     page_login()
-
