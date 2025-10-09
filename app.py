@@ -197,7 +197,13 @@ def page_user_upload_interaction():
             with st.container(border=True):
                 st.subheader(f"{upload['file_name']} by {upload['user_name']}")
                 st.caption(f"Type: {upload['upload_type']} | Uploaded: {upload['timestamp']}")
-                st.info(f"Content placeholder for {upload['file_name']}. In a real app, this could be a video/document viewer.")
+                
+                # --- MODIFIED SECTION: Display video or placeholder ---
+                if upload['upload_type'] == 'Video':
+                    st.video(upload['file_data'])
+                else:
+                    st.info(f"Content placeholder for {upload['upload_type']}: {upload['file_name']}. Download button below.")
+                    st.download_button(f"Download {upload['file_name']}", upload['file_data'], upload['file_name'])
                 
                 with st.expander("View AI Summary & All Feedback"):
                     st.write("**AI-Generated Summary**")
@@ -259,7 +265,12 @@ def page_host_review():
             upload = uploads[uploads['file_name'] == selected_upload_title].iloc[0]
             
             st.header(f"Presenting: {upload['file_name']} by {upload['user_name']}")
-            st.info(f"Host plays the content, while feedback appears below in real-time.")
+            
+            # --- MODIFIED SECTION: Display video or placeholder ---
+            if upload['upload_type'] == 'Video':
+                st.video(upload['file_data'])
+            else:
+                st.info(f"Host presents content for {upload['upload_type']}: {upload['file_name']}. Feedback appears below.")
 
             st.subheader("Live Feedback Dashboard")
             with get_db_connection() as conn:
@@ -335,4 +346,3 @@ elif st.session_state.page == 'retro_summary':
 else:
     # Default to the pod selection page if the state is invalid.
     page_pod_selection()
-
