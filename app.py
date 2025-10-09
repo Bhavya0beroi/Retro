@@ -195,8 +195,8 @@ def page_host_review():
     
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # SOLUTION: The parameter must be passed as a tuple, hence the comma: (pod_id,)
-        cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (pod_id,))
+        # SOLUTION: Explicitly cast the pod_id to int before passing it to the database.
+        cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (int(pod_id),))
         result = cursor.fetchone()
         live_upload_id = result[0] if result else None
 
@@ -300,7 +300,8 @@ if 'logged_in' in st.session_state and st.session_state.logged_in:
         pod_id = st.session_state.get('selected_pod_id')
         if pod_id:
             with get_db_connection() as conn:
-                conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (pod_id,))
+                # Proactive fix for the same potential issue here
+                conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (int(pod_id),))
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
@@ -317,3 +318,4 @@ if 'logged_in' in st.session_state and st.session_state.logged_in:
 
 else:
     page_login()
+
