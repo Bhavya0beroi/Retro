@@ -9,16 +9,26 @@ st.set_page_config(layout="wide", page_title="Zero1 Retro Studio")
 
 # --- 2. Database Initialization ---
 def init_db():
-    """Initializes the SQLite database and creates tables if they don't exist."""
-    with sqlite3.connect('retro_studio.db', timeout=20) as conn: # Increased timeout
+    """
+    Initializes the SQLite database. Creates tables if they don't exist
+    and adds the 'live_upload_id' column if it's missing.
+    """
+    with sqlite3.connect('retro_studio.db', timeout=20) as conn:
         c = conn.cursor()
         c.execute('''
             CREATE TABLE IF NOT EXISTS pods (
                 id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                live_upload_id INTEGER DEFAULT NULL 
+                name TEXT NOT NULL UNIQUE
             )
         ''')
+        
+        # SOLUTION: This block makes the app self-healing.
+        # It checks if the 'live_upload_id' column exists and adds it if not.
+        c.execute("PRAGMA table_info(pods)")
+        columns = [info[1] for info in c.fetchall()]
+        if 'live_upload_id' not in columns:
+            c.execute("ALTER TABLE pods ADD COLUMN live_upload_id INTEGER DEFAULT NULL")
+
         c.execute('''
             CREATE TABLE IF NOT EXISTS uploads (
                 id INTEGER PRIMARY KEY,
@@ -48,17 +58,11 @@ init_db()
 
 # --- 3. Helper Functions ---
 def get_db_connection():
-    """
-    Returns a connection object to the SQLite database with a timeout.
-    SOLUTION: Increased timeout handles database locking during concurrent access.
-    """
+    """Returns a connection object to the SQLite database with a timeout."""
     return sqlite3.connect('retro_studio.db', timeout=20)
 
 def get_live_session_status(pod_id):
-    """
-    Safely fetches the live session status for a given pod.
-    SOLUTION: Isolates the critical query and includes error handling.
-    """
+    """Safely fetches the live session status for a given pod."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -66,8 +70,6 @@ def get_live_session_status(pod_id):
             result = cursor.fetchone()
             return result[0] if result else None
     except sqlite3.OperationalError:
-        # If the database is locked, it will wait due to the timeout.
-        # If it still fails, return None and let the UI handle it gracefully.
         return None
 
 def get_pods():
@@ -212,7 +214,7 @@ def page_user_upload_interaction():
                         if st.form_submit_button("Post Comment"):
                             add_interaction(upload['id'], st.session_state.user_name, 'comment', comment_text)
 
-# == Page 3: Host Review & Voting (REWRITTEN FOR STABILITY) ==
+# == Page 3: Host Review & Voting ==
 def page_host_review():
     st.title("Live Review Session")
 
@@ -222,7 +224,6 @@ def page_host_review():
         
     pod_id = st.session_state.selected_pod_id
     
-    # SOLUTION: Use the robust helper function with a try/except block
     try:
         live_upload_id = get_live_session_status(pod_id)
     except sqlite3.OperationalError:
@@ -260,7 +261,6 @@ def page_host_review():
                 if st.form_submit_button("Post Comment"):
                     add_interaction(live_upload_data['id'], st.session_state.user_name, 'comment', comment_text)
         
-        # Display feedback dashboard (can be expanded)
         st.subheader("Live Feedback Dashboard")
         
         if st.button("🔴 End Live Session"):
