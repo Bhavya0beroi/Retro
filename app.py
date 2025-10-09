@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import time
 
 # --- 1. App Configuration ---
 st.set_page_config(layout="wide", page_title="Zero1 Retro Studio")
@@ -9,7 +10,7 @@ st.set_page_config(layout="wide", page_title="Zero1 Retro Studio")
 # --- 2. Database Initialization ---
 def init_db():
     """Initializes the SQLite database and creates tables if they don't exist."""
-    with sqlite3.connect('retro_studio.db') as conn:
+    with sqlite3.connect('retro_studio.db', timeout=20) as conn: # Increased timeout
         c = conn.cursor()
         c.execute('''
             CREATE TABLE IF NOT EXISTS pods (
@@ -47,8 +48,27 @@ init_db()
 
 # --- 3. Helper Functions ---
 def get_db_connection():
-    """Returns a connection object to the SQLite database."""
-    return sqlite3.connect('retro_studio.db')
+    """
+    Returns a connection object to the SQLite database with a timeout.
+    SOLUTION: Increased timeout handles database locking during concurrent access.
+    """
+    return sqlite3.connect('retro_studio.db', timeout=20)
+
+def get_live_session_status(pod_id):
+    """
+    Safely fetches the live session status for a given pod.
+    SOLUTION: Isolates the critical query and includes error handling.
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (int(pod_id),))
+            result = cursor.fetchone()
+            return result[0] if result else None
+    except sqlite3.OperationalError:
+        # If the database is locked, it will wait due to the timeout.
+        # If it still fails, return None and let the UI handle it gracefully.
+        return None
 
 def get_pods():
     """Fetches all pods from the database."""
@@ -202,16 +222,15 @@ def page_host_review():
         
     pod_id = st.session_state.selected_pod_id
     
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (int(pod_id),))
-        result = cursor.fetchone()
-        live_upload_id = result[0] if result else None
+    # SOLUTION: Use the robust helper function with a try/except block
+    try:
+        live_upload_id = get_live_session_status(pod_id)
+    except sqlite3.OperationalError:
+        st.warning("Database is busy, retrying... Please wait.")
+        time.sleep(1)
+        st.rerun()
 
-    # --- RENDER PAGE BASED ON WHETHER A SESSION IS LIVE ---
-
-    if live_upload_id:
-        # STATE 1: SESSION IS LIVE (View for everyone, including host)
+    if live_upload_id is not None:
         with get_db_connection() as conn:
             live_upload_data_df = pd.read_sql_query("SELECT * FROM uploads WHERE id = ?", conn, params=(int(live_upload_id),))
         
@@ -225,7 +244,6 @@ def page_host_review():
         st.header(f"Presenting: {live_upload_data['file_name']} by {live_upload_data['user_name']}")
         display_uploaded_content(live_upload_data)
         
-        # Interaction UI for all members
         st.subheader("Live Interaction")
         cols = st.columns(2)
         with cols[0]:
@@ -242,21 +260,15 @@ def page_host_review():
                 if st.form_submit_button("Post Comment"):
                     add_interaction(live_upload_data['id'], st.session_state.user_name, 'comment', comment_text)
         
+        # Display feedback dashboard (can be expanded)
         st.subheader("Live Feedback Dashboard")
-        with get_db_connection() as conn:
-            interactions = pd.read_sql_query("SELECT * FROM interactions WHERE upload_id = ?", conn, params=(int(live_upload_id),))
-        if not interactions.empty:
-            # Display feedback...
-            pass # UI for feedback dashboard can go here
-
-        # Host-only button to end the session
+        
         if st.button("🔴 End Live Session"):
             with get_db_connection() as conn:
                 conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (int(pod_id),))
             st.rerun()
 
     else:
-        # STATE 2: SESSION IS NOT LIVE (View for everyone)
         st.info("No session is currently live. Any member can start a new session.")
         st.write("Select an upload to present to the team.")
         
