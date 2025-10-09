@@ -134,6 +134,11 @@ def page_login():
 
 # == Page 2: User Upload & Interaction ==
 def page_user_upload_interaction():
+    # Defensive check for session state
+    if 'selected_pod_name' not in st.session_state:
+        st.error("Session expired. Please log out and log back in.")
+        return
+
     st.title(f"Pod Channel: {st.session_state.selected_pod_name}")
     st.write("Upload your work, view submissions from your team, and provide feedback asynchronously.")
 
@@ -191,11 +196,16 @@ def page_user_upload_interaction():
 # == Page 3: Host Review & Voting ==
 def page_host_review():
     st.title("Host Review Session")
+    
+    # SOLUTION: This is the definitive guard clause to prevent the error.
+    if 'selected_pod_id' not in st.session_state or st.session_state.selected_pod_id is None:
+        st.error("Could not identify the pod. Please log out and select your pod again.")
+        return
+        
     pod_id = st.session_state.selected_pod_id
     
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # SOLUTION: Explicitly cast the pod_id to int before passing it to the database.
         cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (int(pod_id),))
         result = cursor.fetchone()
         live_upload_id = result[0] if result else None
@@ -256,6 +266,11 @@ def page_host_review():
 
 # == Page 4: Retro Summary ==
 def page_retro_summary():
+    # Defensive check for session state
+    if 'selected_pod_name' not in st.session_state:
+        st.error("Session expired. Please log out and log back in.")
+        return
+
     st.title("Retro Summary Library")
     st.write(f"Review past retro sessions and learnings for {st.session_state.selected_pod_name}.")
     
@@ -284,7 +299,9 @@ def page_retro_summary():
 if 'logged_in' in st.session_state and st.session_state.logged_in:
     # --- Sidebar for logged-in users ---
     st.sidebar.title("Zero1 Retro Studio")
-    st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{st.session_state.selected_pod_name}**")
+    # Defensive check for session state
+    if 'user_name' in st.session_state and 'selected_pod_name' in st.session_state:
+        st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{st.session_state.selected_pod_name}**")
     
     st.sidebar.header("Navigation")
     if st.sidebar.button("Current Pod Channel"):
@@ -300,7 +317,6 @@ if 'logged_in' in st.session_state and st.session_state.logged_in:
         pod_id = st.session_state.get('selected_pod_id')
         if pod_id:
             with get_db_connection() as conn:
-                # Proactive fix for the same potential issue here
                 conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (int(pod_id),))
         for key in list(st.session_state.keys()):
             del st.session_state[key]
