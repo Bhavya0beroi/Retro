@@ -79,7 +79,7 @@ def generate_ai_summary(upload_id):
     """Placeholder for AI summary. Generates a summary from comments."""
     with get_db_connection() as conn:
         comments_df = pd.read_sql_query(
-            f"SELECT content FROM interactions WHERE upload_id = {upload_id} AND interaction_type = 'comment'", conn
+            "SELECT content FROM interactions WHERE upload_id = ? AND interaction_type = 'comment'", conn, params=(upload_id,)
         )
     if comments_df.empty:
         return "No comments available to generate a summary."
@@ -148,7 +148,7 @@ def page_login():
 def page_user_upload_interaction():
     pod_id = st.session_state.selected_pod_id
     with get_db_connection() as conn:
-        pod_name = pd.read_sql_query(f"SELECT name FROM pods WHERE id = {pod_id}", conn).iloc[0]['name']
+        pod_name = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,)).iloc[0]['name']
     
     st.title(f"Pod Channel: {pod_name}")
     st.write("Upload your work, view submissions from your team, and provide feedback asynchronously.")
@@ -169,7 +169,7 @@ def page_user_upload_interaction():
 
     st.header("Pod Feed")
     with get_db_connection() as conn:
-        uploads = pd.read_sql_query(f"SELECT * FROM uploads WHERE pod_id = {pod_id} ORDER BY timestamp DESC", conn)
+        uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ? ORDER BY timestamp DESC", conn, params=(pod_id,))
 
     if uploads.empty:
         st.info("No uploads in this pod yet. Be the first!")
@@ -179,14 +179,12 @@ def page_user_upload_interaction():
                 st.subheader(f"{upload['file_name']} by {upload['user_name']}")
                 st.caption(f"Type: {upload['upload_type']} | Uploaded: {upload['timestamp']}")
                 
-                # Use the reusable function to display content
                 display_uploaded_content(upload)
                 
-                # Interaction section remains the same
                 with st.expander("View AI Summary & All Feedback"):
                     st.write("**AI-Generated Summary**")
                     st.code(generate_ai_summary(upload['id']), language='text')
-                # ... [rest of the interaction UI: reactions, votes, comments] ...
+                
                 cols = st.columns(2)
                 with cols[0]: 
                     st.write("**React**")
@@ -214,23 +212,24 @@ def page_host_review():
     pod_id = st.session_state.selected_pod_id
     
     with get_db_connection() as conn:
-        # Check if a session is live for this pod
-        live_upload_id = pd.read_sql_query(f"SELECT live_upload_id FROM pods WHERE id = {pod_id}", conn).iloc[0]['live_upload_id']
+        # CORRECTED QUERY: Using parameters to prevent SQL injection and parsing errors.
+        live_upload_id_df = pd.read_sql_query("SELECT live_upload_id FROM pods WHERE id = ?", conn, params=(pod_id,))
+        live_upload_id = live_upload_id_df.iloc[0]['live_upload_id']
 
     if live_upload_id:
         # --- ATTENDEE VIEW ---
         st.success("🟢 A retro session is LIVE! Join in and give your feedback.")
         with get_db_connection() as conn:
-            live_upload_data = pd.read_sql_query(f"SELECT * FROM uploads WHERE id = {live_upload_id}", conn).iloc[0]
+            # CORRECTED QUERY
+            live_upload_data = pd.read_sql_query("SELECT * FROM uploads WHERE id = ?", conn, params=(int(live_upload_id),)).iloc[0]
         
         st.header(f"Presenting: {live_upload_data['file_name']} by {live_upload_data['user_name']}")
         display_uploaded_content(live_upload_data)
         
-        # Live feedback dashboard for attendees
         st.subheader("Live Feedback Dashboard")
-        # ... [feedback dashboard code, same as host view] ...
         with get_db_connection() as conn:
-            interactions = pd.read_sql_query(f"SELECT * FROM interactions WHERE upload_id = {live_upload_id}", conn)
+            # CORRECTED QUERY
+            interactions = pd.read_sql_query("SELECT * FROM interactions WHERE upload_id = ?", conn, params=(int(live_upload_id),))
         if not interactions.empty:
             votes = interactions[interactions['interaction_type'] == 'vote']['content'].value_counts()
             reactions = interactions[interactions['interaction_type'] == 'reaction']['content'].value_counts()
@@ -245,7 +244,8 @@ def page_host_review():
         # --- HOST VIEW (when no session is live) ---
         st.write("As the host, select an upload to present to the team.")
         with get_db_connection() as conn:
-            uploads = pd.read_sql_query(f"SELECT * FROM uploads WHERE pod_id = {pod_id}", conn)
+            # CORRECTED QUERY
+            uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(pod_id,))
 
         if uploads.empty:
             st.warning("No uploads found for this pod to present.")
@@ -256,7 +256,7 @@ def page_host_review():
         
         if st.button("🚀 Go Live with this Upload"):
             with get_db_connection() as conn:
-                conn.execute(f"UPDATE pods SET live_upload_id = {selected_upload_id} WHERE id = {pod_id}")
+                conn.execute("UPDATE pods SET live_upload_id = ? WHERE id = ?", (selected_upload_id, pod_id))
             st.rerun()
 
 # == Page 4: Retro Summary ==
@@ -266,8 +266,8 @@ def page_retro_summary():
     
     pod_id = st.session_state.selected_pod_id
     with get_db_connection() as conn:
-        pod_name = pd.read_sql_query(f"SELECT name FROM pods WHERE id = {pod_id}", conn).iloc[0]['name']
-        uploads = pd.read_sql_query(f"SELECT * FROM uploads WHERE pod_id = {pod_id}", conn)
+        pod_name = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(pod_id,)).iloc[0]['name']
+        uploads = pd.read_sql_query("SELECT * FROM uploads WHERE pod_id = ?", conn, params=(pod_id,))
     
     st.header(f"Summaries for {pod_name}")
     if uploads.empty:
@@ -281,7 +281,7 @@ def page_retro_summary():
                 st.code(generate_ai_summary(upload['id']), language='text')
                 
                 with get_db_connection() as conn:
-                     votes = pd.read_sql_query(f"SELECT content FROM interactions WHERE upload_id={upload['id']} AND interaction_type='vote'", conn)['content'].value_counts()
+                     votes = pd.read_sql_query("SELECT content FROM interactions WHERE upload_id = ? AND interaction_type='vote'", conn, params=(upload['id'],))['content'].value_counts()
                 st.write("**Final Vote:**")
                 if not votes.empty:
                     st.bar_chart(votes)
@@ -296,7 +296,7 @@ else:
     # --- Sidebar for logged-in users ---
     st.sidebar.title("Zero1 Retro Studio")
     with get_db_connection() as conn:
-        pod_name = pd.read_sql_query(f"SELECT name FROM pods WHERE id = {st.session_state.selected_pod_id}", conn).iloc[0]['name']
+        pod_name = pd.read_sql_query("SELECT name FROM pods WHERE id = ?", conn, params=(st.session_state.selected_pod_id,)).iloc[0]['name']
     st.sidebar.info(f"User: **{st.session_state.user_name}**\n\nPod: **{pod_name}**")
     
     st.sidebar.header("Navigation")
@@ -312,7 +312,7 @@ else:
     if st.sidebar.button("Logout"):
         # Reset pod's live session on logout if user is host
         with get_db_connection() as conn:
-            conn.execute(f"UPDATE pods SET live_upload_id = NULL WHERE id = {st.session_state.selected_pod_id}")
+            conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (st.session_state.selected_pod_id,))
         for key in st.session_state.keys():
             del st.session_state[key]
         st.rerun()
