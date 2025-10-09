@@ -113,7 +113,6 @@ def page_login():
         if selected_pod_name and user_name_input:
             selected_pod = pods[pods['name'] == selected_pod_name]
             if not selected_pod.empty:
-                # SOLUTION: Store all necessary info in session state at login
                 st.session_state.logged_in = True
                 st.session_state.user_name = user_name_input
                 st.session_state.selected_pod_id = int(selected_pod.iloc[0]['id'])
@@ -195,8 +194,11 @@ def page_host_review():
     pod_id = st.session_state.selected_pod_id
     
     with get_db_connection() as conn:
-        live_upload_id_df = pd.read_sql_query("SELECT live_upload_id FROM pods WHERE id = ?", conn, params=(pod_id,))
-        live_upload_id = live_upload_id_df.iloc[0]['live_upload_id']
+        # FIX: Using a direct cursor execute for reliability
+        cursor = conn.cursor()
+        cursor.execute("SELECT live_upload_id FROM pods WHERE id = ?", (pod_id,))
+        result = cursor.fetchone()
+        live_upload_id = result[0] if result else None
 
     if live_upload_id:
         with get_db_connection() as conn:
@@ -279,7 +281,6 @@ def page_retro_summary():
                     st.write("No votes were recorded.")
 
 # --- Main App Router ---
-# SOLUTION: This router is now much cleaner and more reliable.
 if 'logged_in' in st.session_state and st.session_state.logged_in:
     # --- Sidebar for logged-in users ---
     st.sidebar.title("Zero1 Retro Studio")
@@ -297,12 +298,10 @@ if 'logged_in' in st.session_state and st.session_state.logged_in:
         if pod_id:
             with get_db_connection() as conn:
                 conn.execute("UPDATE pods SET live_upload_id = NULL WHERE id = ?", (pod_id,))
-        # Clear all session data on logout
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
-    # --- Page routing for logged-in users ---
     page_to_show = st.session_state.get('page', 'user_upload_interaction')
     if page_to_show == 'user_upload_interaction':
         page_user_upload_interaction()
@@ -310,10 +309,9 @@ if 'logged_in' in st.session_state and st.session_state.logged_in:
         page_host_review()
     elif page_to_show == 'retro_summary':
         page_retro_summary()
-    else: # Fallback to the main pod page
+    else:
         page_user_upload_interaction()
 
 else:
-    # If not logged in, always show the login page.
     page_login()
 
